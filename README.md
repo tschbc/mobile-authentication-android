@@ -6,7 +6,7 @@ MobileAuthentication supports Android API 23 and above so AES encryption can be 
 
 ## Getting Started
 project build.gradle:
-```
+```groovy
 allprojects {
 	repositories {
 		...
@@ -16,7 +16,7 @@ allprojects {
 ```
 	
 app build.gradle:
-```
+```groovy
 dependencies {
 	implementation "com.github.bcgov:mobile-authentication-android:<LATEST_VERSION>"
 }
@@ -25,19 +25,33 @@ dependencies {
 ### Prerequisites
 A Red Hat Single Sign-On server component that is setup to handle an OAuth2 authorization code flow.
 
-### Android Manifest
-You will need to add this to your AndroidManifest and specify what custom schema you're using in your redirectUri.
-```xml
-<activity android:name="ca.bc.gov.mobileauthentication.screens.redirect.RedirectActivity"
-	android:launchMode="singleInstance">
-	<intent-filter android:autoVerify="true">
-		<action android:name="android.intent.action.VIEW" />
-		<category android:name="android.intent.category.DEFAULT" />
-		<category android:name="android.intent.category.BROWSABLE" />
-		<data android:scheme="<YOUR_CUSTOM_SCHEME_USED_IN_REDIRECT_URI>" />
-	</intent-filter>
-</activity>
+### Handling Custom Scheme Redirects
+
+Specify the redirect value by setting the manifest placeholder value `appAuthRedirectScheme` in your project's build.gradle file:
+
+```groovy
+android {
+    defaultConfig {
+        ...
+
+        manifestPlaceholders = [
+                'appAuthRedirectScheme': '<YOUR_CUSTOM_SCHEME_USED_IN_REDIRECT_URI>'
+        ]
+
+        ...
+    }
+}
 ```
+
+Only the scheme is required:
+
+> 'appAuthRedirectScheme': 'custom-scheme' <- happiness
+
+Adding any more isn't valid:
+
+> 'appAuthRedirectScheme': 'custom-scheme://somePath'  <- runtime issues
+
+***Note:*** you were previously required to add RedirectActivity with an intent filter to your application's manifest. This is no longer required because the functionality is handled by this manifest placeholder value.
 
 ## Usage
 There are four main commands for handling tokens that will be called using the MobileAuthenticationClient class.
@@ -62,7 +76,7 @@ The parameters needed for the client can all be found on your Red Hat Single Sig
 
 The hint param is optional and can be used to directly send the user to the specified login.
 
-We recommened you use a custom application schema for your redirectUri such as <NAME_OF_YOUR_APP>://android
+We recommend you use a custom application schema for your redirectUri such as <NAME_OF_YOUR_APP>://android
 
 Please use the context of the activity in which you are going to call authenticate to create the client.
 
@@ -100,7 +114,7 @@ If the token is expired and the refresh token is NOT expired the token will auto
 
 Exceptions:
 1. If there is no token locally a `TokenNotFoundException` will be thrown in the onError of the TokenCallback. This means the user has not yet been authenticated so no token exists locally.
-2. If the token's refresh token is expired a `RefreshExpiredException` will be thrown in the onError of the TokenCallback. In this case the user will need to reauthenticate.
+2. If the token's refresh token is expired a `RefreshExpiredException` will be thrown in the onError of the TokenCallback. In this case the user will need to re-authenticate.
 3. If the token does not have a refresh token then a `NoRefreshTokenException` will be thrown in the onError of the TokenCallback. This means the Token data being returned does not contain the required refreshToken for this lib to work.
 
 Calling getToken:
@@ -130,7 +144,7 @@ client?.getToken(object: MobileAuthenticationClient.TokenCallback {
 Refresh token will refresh the locally stored token.
 
 Exceptions:
-1. If the token's refresh token is expired a `RefreshExpiredException` will be thrown in the onError of the TokenCallback. In this case the user will need to reauthenticate.
+1. If the token's refresh token is expired a `RefreshExpiredException` will be thrown in the onError of the TokenCallback. In this case the user will need to re-authenticate.
 2. If the token does not have a refresh token then a `NoRefreshTokenException` will be thrown in the onError of the TokenCallback. This means the Token data being returned does not contain the required refreshToken for this lib to work.
 
 Calling refreshToken:

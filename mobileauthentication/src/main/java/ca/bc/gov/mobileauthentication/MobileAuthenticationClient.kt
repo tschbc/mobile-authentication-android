@@ -4,10 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.preference.PreferenceManager
-import ca.bc.gov.mobileauthentication.common.Constants
 import ca.bc.gov.mobileauthentication.common.exceptions.TokenNotFoundException
-import ca.bc.gov.mobileauthentication.common.utils.UrlUtils
-import ca.bc.gov.mobileauthentication.data.AuthApi
+import ca.bc.gov.mobileauthentication.data.AppAuthApi
 import ca.bc.gov.mobileauthentication.data.models.Token
 import ca.bc.gov.mobileauthentication.data.repos.token.TokenRepo
 import ca.bc.gov.mobileauthentication.di.Injection
@@ -51,11 +49,9 @@ class MobileAuthenticationClient(
     private val disposables = CompositeDisposable()
 
     private val gson: Gson = Injection.provideGson()
-    private val grantType: String = Constants.GRANT_TYPE_AUTH_CODE
-    private val authApi: AuthApi = InjectionUtils.getAuthApi(UrlUtils.cleanBaseUrl(baseUrl))
+    private val appauthApi: AppAuthApi = AppAuthApi(context, baseUrl, realmName, authEndpoint, redirectUri, clientId, hint)
     private val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
-    private val tokenRepo: TokenRepo = InjectionUtils.getTokenRepo(
-            authApi, realmName, grantType, redirectUri, clientId, sharedPrefs)
+    private val tokenRepo: TokenRepo = InjectionUtils.getTokenRepo(appauthApi, sharedPrefs)
 
     private var passedRequestCode: Int = DEFAULT_REQUEST_CODE
 
@@ -64,6 +60,7 @@ class MobileAuthenticationClient(
      */
     override fun authenticate(requestCode: Int) {
         this.passedRequestCode = requestCode
+
         Intent(context, RedirectActivity::class.java)
                 .putExtra(RedirectActivity.BASE_URL, baseUrl)
                 .putExtra(RedirectActivity.REALM_NAME, realmName)
@@ -78,21 +75,34 @@ class MobileAuthenticationClient(
      * Handles on activity result and determines if the authentication was successful
      * or an error occurred.
      */
-    override fun handleAuthResult(
-            requestCode: Int, resultCode: Int, data: Intent?,
-            tokenCallback: TokenCallback) {
+    override fun handleAuthResult(requestCode: Int, resultCode: Int, data: Intent?,
+                                  tokenCallback: TokenCallback) {
+        if (requestCode != passedRequestCode)
+            return
 
-        if (resultCode == Activity.RESULT_OK && requestCode == passedRequestCode && data != null) {
-            val success = data.getBooleanExtra(MobileAuthenticationClient.SUCCESS, false)
-            if (success) {
-                val tokenJson = data.getStringExtra(MobileAuthenticationClient.TOKEN_JSON)
-                val token: Token = gson.fromJson(tokenJson, Token::class.java)
-                tokenCallback.onSuccess(token)
-            }
-            else {
-                val errorMessage = data.getStringExtra(MobileAuthenticationClient.ERROR_MESSAGE)
-                tokenCallback.onError(Throwable(errorMessage))
-            }
+        if (resultCode != Activity.RESULT_OK) {
+            val message = data?.getStringExtra(ERROR_MESSAGE) ?: "Unknown authentication error"
+            tokenCallback.onError(Throwable(message))
+            return
+        }
+
+        if (data == null) {
+            tokenCallback.onError(Throwable("Result OK but authentication response is malformed"))
+            return
+        }
+
+        handleConsumerResult(data, tokenCallback)
+    }
+
+    private fun handleConsumerResult(data: Intent, tokenCallback: TokenCallback) {
+        val success = data.getBooleanExtra(SUCCESS, false)
+        if (success) {
+            val tokenJson = data.getStringExtra(TOKEN_JSON)
+            val token: Token = gson.fromJson(tokenJson, Token::class.java)
+            tokenCallback.onSuccess(token)
+        } else {
+            val errorMessage = data.getStringExtra(ERROR_MESSAGE)
+            tokenCallback.onError(Throwable(errorMessage))
         }
     }
 
@@ -104,7 +114,7 @@ class MobileAuthenticationClient(
      * If a token does not exist a @see ca.bc.gov.mobileauthentication.common.exceptions.TokenNotFoundException will be thrown
      */
     override fun getToken(tokenCallback: TokenCallback) {
-        tokenRepo.getToken()
+        tokenRepo.getToken(null)
                 .firstElement()
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread()).subscribeBy(
@@ -123,7 +133,7 @@ class MobileAuthenticationClient(
     /**
      * Gets Token from local storage as a RxJava2 Observable
      */
-    override fun getTokenAsObservable(): Observable<Token> = tokenRepo.getToken()
+    override fun getTokenAsObservable(): Observable<Token> = tokenRepo.getToken(null)
 
     /**
      * Refreshes token
@@ -148,7 +158,7 @@ class MobileAuthenticationClient(
     /**
      * Refreshes Token that is stored in local storage as a RxJava2 Observable
      */
-    override fun refreshTokenAsObservable(): Observable<Token> = tokenRepo.getToken()
+    override fun refreshTokenAsObservable(): Observable<Token> = tokenRepo.getToken(null)
             .flatMap { token -> tokenRepo.refreshToken(token) }
 
     /**
@@ -190,6 +200,7 @@ class MobileAuthenticationClient(
 
     companion object {
         const val DEFAULT_REQUEST_CODE = 1012
+        const val APPAUTH_REQUEST_CODE = 2024
         const val SUCCESS = "SUCCESS"
         const val ERROR_MESSAGE = "ERROR_MESSAGE"
         const val TOKEN_JSON = "TOKEN_JSON"
